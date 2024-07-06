@@ -1,9 +1,19 @@
+using Elastic.Clients.Elasticsearch;
+using Microsoft.AspNetCore.Http.HttpResults;
+using Search.Infrasctructor.Extensions;
+using Search.Models;
+
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
 // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
+
+builder.BindAppSettings();
+
+builder.BrokerConfigure();
+builder.ElasticSearchConfigure();
 
 var app = builder.Build();
 
@@ -16,29 +26,20 @@ if (app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 
-var summaries = new[]
-{
-    "Freezing", "Bracing", "Chilly", "Cool", "Mild", "Warm", "Balmy", "Hot", "Sweltering", "Scorching"
-};
-
-app.MapGet("/weatherforecast", () =>
-{
-    var forecast = Enumerable.Range(1, 5).Select(index =>
-        new WeatherForecast
-        (
-            DateOnly.FromDateTime(DateTime.Now.AddDays(index)),
-            Random.Shared.Next(-20, 55),
-            summaries[Random.Shared.Next(summaries.Length)]
-        ))
-        .ToArray();
-    return forecast;
-})
-.WithName("GetWeatherForecast")
-.WithOpenApi();
-
 app.Run();
 
-internal record WeatherForecast(DateOnly Date, int TemperatureC, string? Summary)
+static async Task<Results<Ok<IReadOnlyCollection<CatalogItemIndex>>, NotFound>> SearchItems(string qr, ElasticsearchClient elasticsearchClient)
 {
-    public int TemperatureF => 32 + (int)(TemperatureC / 0.5556);
+    var response = await elasticsearchClient.SearchAsync<CatalogItemIndex>(s => s
+        .Index(CatalogItemIndex.IndexName)
+        .From(0)
+        .Size(10)
+        .Query(q =>
+             q.Fuzzy(t => t.Field(x => x.Description).Value(qr)))
+    );
+
+    if (response.IsValidResponse)
+        return TypedResults.Ok(response.Documents);
+
+    return TypedResults.NotFound();
 }
